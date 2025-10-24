@@ -55,17 +55,38 @@
                 const notification = document.createElement('div');
                 notification.style.cssText = `
                     position: fixed;
-                    top: 20px;
-                    right: 20px;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
                     background: #1a1d21;
                     color: white;
-                    padding: 15px 20px;
-                    border-radius: 8px;
-                    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                    padding: 20px 25px;
+                    border-radius: 12px;
+                    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
                     z-index: 9999;
-                    max-width: 300px;
+                    max-width: 400px;
                     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                    animation: fadeInScale 0.3s ease-out;
                 `;
+                
+                // Add animation keyframes
+                if (!document.querySelector('#slack-notifier-styles')) {
+                    const styleSheet = document.createElement('style');
+                    styleSheet.id = 'slack-notifier-styles';
+                    styleSheet.textContent = `
+                        @keyframes fadeInScale {
+                            from {
+                                opacity: 0;
+                                transform: translate(-50%, -50%) scale(0.95);
+                            }
+                            to {
+                                opacity: 1;
+                                transform: translate(-50%, -50%) scale(1);
+                            }
+                        }
+                    `;
+                    document.head.appendChild(styleSheet);
+                }
                 
                 notification.innerHTML = `
                     <div style="font-weight: bold; margin-bottom: 5px;">${sender} sent a DM:</div>
@@ -77,9 +98,10 @@
                 
                 // Remove notification after 5 seconds
                 setTimeout(() => {
-                    notification.style.transition = 'opacity 0.5s';
+                    notification.style.transition = 'all 0.3s ease-out';
                     notification.style.opacity = '0';
-                    setTimeout(() => notification.remove(), 500);
+                    notification.style.transform = 'translate(-50%, -50%) scale(0.95)';
+                    setTimeout(() => notification.remove(), 300);
                 }, 5000);
             }
         }
