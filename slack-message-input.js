@@ -27,25 +27,100 @@
     // Keep track of messages we've already notified about
     const notifiedMessages = new Set();
     
+    // Debug function
+    const debug = {
+        log: (message, data) => {
+            console.log(`[Slack DM Notifier] ${message}`, data || '');
+        },
+        warn: (message, data) => {
+            console.warn(`[Slack DM Notifier] ${message}`, data || '');
+        }
+    };
+
+    // Function to check if we're in a DM
+    const isInDirectMessage = () => {
+        const isDM = /\/messages\/@|\/messages\/D|\/client\/[^/]+\/D/.test(location.pathname);
+        debug.log(`URL Check: ${location.pathname} - Is DM: ${isDM}`);
+        return isDM;
+    };
+
     // Watch for new messages
     new MutationObserver(mutations => {
+        if (!isInDirectMessage()) return;
+
         for (const mutation of mutations) {
             for (const node of mutation.addedNodes) {
                 if (!(node instanceof HTMLElement)) continue;
                 
-                // Check if we're in a DM by URL pattern
-                if (!/\/messages\/@|\/messages\/D|\/client\/[^/]+\/D/.test(location.pathname)) continue;
+                debug.log('Checking new node:', node.tagName);
                 
-                // Look for new message content
-                const messageEl = node.querySelector('[data-qa="message-text"]');
-                if (!messageEl) continue;
+                // Try multiple selectors for message content
+                const messageSelectors = [
+                    '[data-qa="message-text"]',
+                    '.p-rich_text_section',
+                    '.c-message__body',
+                    '[data-message-content]'
+                ];
                 
-                const messageId = messageEl.closest('[data-message-id]')?.getAttribute('data-message-id');
-                if (!messageId || notifiedMessages.has(messageId)) continue;
+                let messageEl = null;
+                for (const selector of messageSelectors) {
+                    messageEl = node.querySelector(selector) || node.closest(selector);
+                    if (messageEl) {
+                        debug.log(`Found message using selector: ${selector}`);
+                        break;
+                    }
+                }
                 
-                // Get sender's name if available
-                const senderEl = node.querySelector('[data-qa="message_sender_name"]');
-                const sender = senderEl?.textContent?.trim() || 'Someone';
+                if (!messageEl) {
+                    debug.log('No message element found in node');
+                    continue;
+                }
+                
+                // Try multiple ways to get message ID
+                let messageId = null;
+                const possibleMessageContainers = [
+                    messageEl.closest('[data-message-id]'),
+                    messageEl.closest('[data-ts]'),
+                    messageEl.closest('.c-message_container')
+                ];
+
+                for (const container of possibleMessageContainers) {
+                    messageId = container?.getAttribute('data-message-id') || 
+                              container?.getAttribute('data-ts') || 
+                              container?.getAttribute('id');
+                    if (messageId) {
+                        debug.log('Found message ID:', messageId);
+                        break;
+                    }
+                }
+
+                if (!messageId) {
+                    debug.log('No message ID found, generating timestamp-based ID');
+                    messageId = `msg_${Date.now()}`;
+                }
+
+                if (notifiedMessages.has(messageId)) {
+                    debug.log('Message already notified:', messageId);
+                    continue;
+                }
+                
+                // Try multiple selectors for sender name
+                const senderSelectors = [
+                    '[data-qa="message_sender_name"]',
+                    '.c-message__sender',
+                    '[data-message-sender]',
+                    '.p-rich_text_section strong' // Sometimes sender is in bold at start
+                ];
+                
+                let sender = 'Someone';
+                for (const selector of senderSelectors) {
+                    const senderEl = node.querySelector(selector) || messageEl.closest(selector);
+                    if (senderEl) {
+                        sender = senderEl.textContent.trim();
+                        debug.log('Found sender:', sender);
+                        break;
+                    }
+                }
                 
                 // Get message preview
                 const text = messageEl.textContent.trim();
