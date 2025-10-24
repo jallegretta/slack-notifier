@@ -110,5 +110,14 @@
         subtree: true
     });
     
-    console.log('Slack DM Notifier: Active and watching for messages');
+    console.log('[Slack DM Notifier] Initializing...');
+    try {
+        // Test DOM manipulation
+        const testDiv = document.createElement('div');
+        document.body.appendChild(testDiv);
+        testDiv.remove();
+        console.log('[Slack DM Notifier] Successfully initialized and watching for messages');
+    } catch (error) {
+        console.error('[Slack DM Notifier] Error during initialization:', error);
+    }
 })();
