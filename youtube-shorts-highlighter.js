@@ -70,11 +70,129 @@
         }
     }
 
-    // Scan existing page for anchor links that point to /shorts/
+    // --- Helpers for richer detection ---
+    function parseDurationString(timeStr) {
+        // Accepts formats like "SS", "M:SS", "H:MM:SS"
+        if (!timeStr) return null;
+        const parts = timeStr.trim().split(':').map(p => parseInt(p, 10));
+        if (parts.some(isNaN)) return null;
+        let seconds = 0;
+        if (parts.length === 1) seconds = parts[0];
+        else if (parts.length === 2) seconds = parts[0] * 60 + parts[1];
+        else if (parts.length === 3) seconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+        return seconds;
+    }
+
+    function parseISODuration(iso) {
+        // Very small ISO 8601 duration parser for PT#M#S etc.
+        try {
+            if (!iso || !iso.startsWith('P')) return null;
+            // Example: PT1M23S
+            const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+            if (!m) return null;
+            const h = parseInt(m[1] || 0, 10);
+            const mm = parseInt(m[2] || 0, 10);
+            const s = parseInt(m[3] || 0, 10);
+            return h * 3600 + mm * 60 + s;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function findDurationText(container) {
+        // Common overlay selector used by YouTube thumbnails
+        const selectors = [
+            'ytd-thumbnail-overlay-time-status-renderer',
+            '.ytd-thumbnail-overlay-time-status-renderer',
+            '.thumbnail-overlay-time-status-renderer',
+            '.ytd-thumbnail .ytd-thumbnail-overlay-time-status-renderer',
+            '.ytp-time-duration'
+        ];
+        for (const sel of selectors) {
+            const el = container.querySelector(sel) || container.closest(sel);
+            if (el) {
+                const txt = el.textContent || el.innerText || '';
+                const cleaned = txt.trim().replace(/[^0-9:\s]/g, '');
+                if (cleaned) return cleaned;
+            }
+        }
+        return null;
+    }
+
+    function isShortByDuration(container) {
+        const txt = findDurationText(container);
+        if (!txt) return false;
+        const secs = parseDurationString(txt) || parseISODuration(txt);
+        if (secs === null) return false;
+        return secs > 0 && secs <= 60; // treat <= 60s as short
+    }
+
+    function isShortsHref(a) {
+        try {
+            return !!(a && a.href && a.href.includes('/shorts/'));
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function isShortByMetaOrPlayer() {
+        try {
+            // 1) URL path
+            if (location.pathname && location.pathname.startsWith('/shorts/')) return true;
+
+            // 2) meta itemprop duration (ISO 8601)
+            const meta = document.querySelector('meta[itemprop="duration"]');
+            if (meta && meta.content) {
+                const secs = parseISODuration(meta.content);
+                if (secs !== null) return secs > 0 && secs <= 60;
+            }
+
+            // 3) HTML5 video duration (if available)
+            const vid = document.querySelector('video');
+            if (vid && typeof vid.duration === 'number' && isFinite(vid.duration) && vid.duration > 0) {
+                return vid.duration <= 60;
+            }
+        } catch (e) {
+            // ignore
+        }
+        return false;
+    }
+
+    // Scan existing page for shorts using multiple heuristics
     function scanForShortsOnPage(root = document) {
         try {
+            // 1) anchors that explicitly link to /shorts/
             const anchors = Array.from(root.querySelectorAll('a[href*="/shorts/"]'));
             anchors.forEach(a => highlightShortAnchor(a));
+
+            // 2) thumbnail-like renderers where the overlay duration is <= 60s
+            const candidateContainers = Array.from(root.querySelectorAll(
+                'ytd-rich-grid-media, ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer, ytd-rich-item-renderer, ytd-rich-section-renderer, ytd-thumbnail'
+            ));
+            candidateContainers.forEach(c => {
+                try {
+                    if (isShortByDuration(c)) {
+                        // try to find a link inside
+                        const a = c.querySelector('a[href]') || c.querySelector('a');
+                        if (a) highlightShortAnchor(a);
+                        else if (!c.classList.contains(HIGHLIGHT_CLASS)) c.classList.add(HIGHLIGHT_CLASS);
+                    }
+                } catch (e) {
+                    // ignore per-item errors
+                }
+            });
+
+            // 3) reel / shorts shelf components
+            const reelSelectors = ['ytd-reel-shelf-renderer', 'ytd-reel-player-renderer', 'ytd-rich-shelf-renderer[title*="Shorts"]'];
+            for (const sel of reelSelectors) {
+                const nodes = Array.from(root.querySelectorAll(sel));
+                nodes.forEach(n => n.classList.add(HIGHLIGHT_CLASS));
+            }
+
+            // 4) on-watch-player fallback: meta/player
+            if (isShortByMetaOrPlayer()) {
+                highlightIfOnShortsPage();
+            }
         } catch (e) {
             console.error('Error scanning for shorts anchors', e);
         }
@@ -99,21 +217,38 @@
         }
     }
 
-    // Observe mutations and highlight new anchors that link to /shorts/
+    // Observe mutations and highlight new anchors or thumbnail nodes that look like shorts
     function observeMutations() {
         const mo = new MutationObserver(mutations => {
             for (const m of mutations) {
                 for (const node of m.addedNodes) {
                     if (!(node instanceof HTMLElement)) continue;
-                    // Quick localized scan for anchors inside the added node
+
+                    // 1) Direct anchors linking to /shorts/
                     try {
                         const anchors = node.querySelectorAll ? node.querySelectorAll('a[href*="/shorts/"]') : [];
-                        if (anchors && anchors.length) {
-                            anchors.forEach(a => highlightShortAnchor(a));
-                        }
+                        if (anchors && anchors.length) anchors.forEach(a => highlightShortAnchor(a));
                     } catch (e) {
                         // ignore
                     }
+
+                    // 2) Newly added thumbnail/renderers -> check duration overlay
+                    try {
+                        const candidates = node.querySelectorAll ? node.querySelectorAll(
+                            'ytd-rich-grid-media, ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer, ytd-thumbnail'
+                        ) : [];
+                        if (candidates && candidates.length) {
+                            candidates.forEach(c => {
+                                try {
+                                    if (isShortByDuration(c)) {
+                                        const a = c.querySelector('a[href]') || c.querySelector('a');
+                                        if (a) highlightShortAnchor(a);
+                                        else if (!c.classList.contains(HIGHLIGHT_CLASS)) c.classList.add(HIGHLIGHT_CLASS);
+                                    }
+                                } catch (e) {}
+                            });
+                        }
+                    } catch (e) {}
                 }
             }
         });
