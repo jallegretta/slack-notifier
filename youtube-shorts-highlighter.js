@@ -16,6 +16,9 @@
     const PLAYER_CLASS = 'tm-shorts-player-highlight';
     // Debug mode: enable by adding ?tmdebug=1 to the URL or set localStorage.tm_shorts_debug = '1'
     const DEBUG = (location.search && location.search.includes('tmdebug=1')) || localStorage.getItem('tm_shorts_debug') === '1';
+    // Aggressive mode: temporarily highlight a wide set of candidates so you can see what the script is scanning
+    // enable by adding ?tmaggr=1 or set localStorage.tm_shorts_aggressive = '1'
+    const AGGRESSIVE = (location.search && location.search.includes('tmaggr=1')) || localStorage.getItem('tm_shorts_aggressive') === '1';
 
     function debugLog(...args) {
         if (DEBUG) console.log('[tm-shorts-debug]', ...args);
@@ -65,8 +68,70 @@
             .tm-shorts-highlight, .tm-shorts-player-highlight {
                 position: relative !important;
             }
+            /* Aggressive temporary outline for debugging */
+            .tm-shorts-aggressive-temp {
+                outline: 5px dashed rgba(255, 0, 0, 1) !important;
+                box-shadow: 0 0 28px rgba(255,0,0,0.6) !important;
+                transition: all 0.15s ease-in-out;
+            }
         `;
         (document.head || document.documentElement).appendChild(s);
+    }
+
+    // Aggressive scan: mark a wide set of candidate elements for a short time so user can visually inspect
+    function aggressiveScan(root = document, durationMs = 6000) {
+        try {
+            const selectors = [
+                'ytd-thumbnail',
+                'ytd-rich-grid-media',
+                'ytd-video-renderer',
+                'ytd-grid-video-renderer',
+                'ytd-compact-video-renderer',
+                'ytd-rich-item-renderer',
+                'ytd-rich-section-renderer',
+                'ytd-reel-shelf-renderer',
+                'ytd-reel-player-renderer',
+                'ytd-playlist-panel-renderer',
+                '.yt-core-video-list-item',
+                '.yt-lockup'
+            ];
+
+            const nodes = new Set();
+            selectors.forEach(sel => {
+                try {
+                    const found = Array.from(root.querySelectorAll(sel));
+                    found.forEach(n => nodes.add(n));
+                } catch (e) {}
+            });
+
+            debugLog('aggressiveScan: candidates found', nodes.size);
+
+            nodes.forEach(n => {
+                try {
+                    // add temporary aggressive class and a badge if none exists
+                    if (!n.classList.contains('tm-shorts-aggressive-temp')) n.classList.add('tm-shorts-aggressive-temp');
+                    addBadge(n, false);
+                } catch (e) {}
+            });
+
+            // remove temporary markers after durationMs
+            setTimeout(() => {
+                nodes.forEach(n => {
+                    try {
+                        n.classList.remove('tm-shorts-aggressive-temp');
+                        const badge = n.querySelector && n.querySelector('.tm-shorts-badge');
+                        if (badge && badge.textContent === 'SHORT') badge.remove();
+                        // if we added position style earlier and marked it, remove it
+                        if (n.getAttribute && n.getAttribute('data-tm-shorts-pos-fixed')) {
+                            n.style.position = '';
+                            n.removeAttribute('data-tm-shorts-pos-fixed');
+                        }
+                    } catch (e) {}
+                });
+            }, durationMs);
+        } catch (e) {
+            console.error('Error during aggressiveScan', e);
+        }
     }
 
     // Given an <a> that links to a shorts URL, find the best container to highlight
@@ -369,6 +434,11 @@
         observeMutations();
         enableLocationChangeEvent();
         window.addEventListener('locationchange', onLocationChange);
+        // If debug or aggressive mode enabled, run an aggressive visual scan so user can see candidate elements
+        if (DEBUG || AGGRESSIVE) {
+            console.log('YouTube Shorts Highlighter: aggressive debug enabled');
+            aggressiveScan(document, 7000);
+        }
         console.log('YouTube Shorts Highlighter: active');
     }
 
