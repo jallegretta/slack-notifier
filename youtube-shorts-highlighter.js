@@ -30,6 +30,35 @@
                 outline: 4px solid rgba(255,0,0,0.95) !important;
                 box-shadow: 0 0 18px rgba(255,0,0,0.45) !important;
             }
+            /* Badge styles */
+            .tm-shorts-badge {
+                position: absolute;
+                top: 6px;
+                left: 6px;
+                background: rgba(204, 0, 0, 0.95);
+                color: #fff;
+                padding: 3px 6px;
+                font-size: 11px;
+                font-weight: 700;
+                border-radius: 4px;
+                z-index: 99999 !important;
+                pointer-events: none;
+                box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+                font-family: sans-serif;
+                text-transform: uppercase;
+                letter-spacing: 0.6px;
+            }
+            .tm-shorts-badge.player-badge {
+                top: 10px;
+                left: 10px;
+                padding: 6px 8px;
+                font-size: 13px;
+                border-radius: 6px;
+            }
+            /* Ensure container is positioned so badge can be absolutely placed */
+            .tm-shorts-highlight, .tm-shorts-player-highlight {
+                position: relative !important;
+            }
         `;
         (document.head || document.documentElement).appendChild(s);
     }
@@ -64,9 +93,39 @@
             if (!container) return;
             if (!container.classList.contains(HIGHLIGHT_CLASS)) {
                 container.classList.add(HIGHLIGHT_CLASS);
+                // Add a visible badge overlay to the container
+                addBadge(container, false);
             }
         } catch (e) {
             console.error('Shorts highlighter error', e);
+        }
+    }
+
+    // Add a small 'SHORT' badge to a container (idempotent)
+    function addBadge(container, isPlayer) {
+        try {
+            if (!container) return;
+            // If badge already present, return
+            if (container.querySelector && container.querySelector('.tm-shorts-badge')) return;
+
+            const badge = document.createElement('div');
+            badge.className = 'tm-shorts-badge' + (isPlayer ? ' player-badge' : '');
+            badge.textContent = 'SHORT';
+
+            // Ensure the container can position absolute children
+            const prevPosition = window.getComputedStyle(container).position;
+            if (!prevPosition || prevPosition === 'static') {
+                // set a data attribute so we can avoid overwriting later
+                container.style.position = 'relative';
+                container.setAttribute('data-tm-shorts-pos-fixed', '1');
+            }
+
+            // Insert badge as first child for visibility
+            if (container.firstChild) container.insertBefore(badge, container.firstChild);
+            else container.appendChild(badge);
+        } catch (e) {
+            // don't let badge creation break other logic
+            console.error('Error adding shorts badge', e);
         }
     }
 
@@ -186,7 +245,10 @@
             const reelSelectors = ['ytd-reel-shelf-renderer', 'ytd-reel-player-renderer', 'ytd-rich-shelf-renderer[title*="Shorts"]'];
             for (const sel of reelSelectors) {
                 const nodes = Array.from(root.querySelectorAll(sel));
-                nodes.forEach(n => n.classList.add(HIGHLIGHT_CLASS));
+                nodes.forEach(n => {
+                    if (!n.classList.contains(HIGHLIGHT_CLASS)) n.classList.add(HIGHLIGHT_CLASS);
+                    addBadge(n, false);
+                });
             }
 
             // 4) on-watch-player fallback: meta/player
@@ -208,6 +270,8 @@
                     const el = document.querySelector(sel);
                     if (el && !el.classList.contains(PLAYER_CLASS)) {
                         el.classList.add(PLAYER_CLASS);
+                        // add a player badge overlay
+                        addBadge(el, true);
                         break;
                     }
                 }
@@ -243,7 +307,10 @@
                                     if (isShortByDuration(c)) {
                                         const a = c.querySelector('a[href]') || c.querySelector('a');
                                         if (a) highlightShortAnchor(a);
-                                        else if (!c.classList.contains(HIGHLIGHT_CLASS)) c.classList.add(HIGHLIGHT_CLASS);
+                                        else if (!c.classList.contains(HIGHLIGHT_CLASS)) {
+                                            c.classList.add(HIGHLIGHT_CLASS);
+                                            addBadge(c, false);
+                                        }
                                     }
                                 } catch (e) {}
                             });
