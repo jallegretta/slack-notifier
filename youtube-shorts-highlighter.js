@@ -14,6 +14,12 @@
     const STYLE_ID = 'tm-shorts-highlighter-style';
     const HIGHLIGHT_CLASS = 'tm-shorts-highlight';
     const PLAYER_CLASS = 'tm-shorts-player-highlight';
+    // Debug mode: enable by adding ?tmdebug=1 to the URL or set localStorage.tm_shorts_debug = '1'
+    const DEBUG = (location.search && location.search.includes('tmdebug=1')) || localStorage.getItem('tm_shorts_debug') === '1';
+
+    function debugLog(...args) {
+        if (DEBUG) console.log('[tm-shorts-debug]', ...args);
+    }
 
     // Inject styles (safe and idempotent)
     function injectStyles() {
@@ -87,7 +93,7 @@
         return thumb;
     }
 
-    function highlightShortAnchor(a) {
+    function highlightShortAnchor(a, reason) {
         try {
             const container = findContainerForAnchor(a);
             if (!container) return;
@@ -95,6 +101,9 @@
                 container.classList.add(HIGHLIGHT_CLASS);
                 // Add a visible badge overlay to the container
                 addBadge(container, false);
+                debugLog('Highlighted anchor', { href: a && a.href, reason, container });
+            } else {
+                debugLog('Already highlighted', { href: a && a.href, reason, container });
             }
         } catch (e) {
             console.error('Shorts highlighter error', e);
@@ -222,37 +231,44 @@
         try {
             // 1) anchors that explicitly link to /shorts/
             const anchors = Array.from(root.querySelectorAll('a[href*="/shorts/"]'));
-            anchors.forEach(a => highlightShortAnchor(a));
+            debugLog('scanForShortsOnPage: anchors with /shorts/ found', anchors.length);
+            anchors.forEach(a => highlightShortAnchor(a, 'href'));
 
             // 2) thumbnail-like renderers where the overlay duration is <= 60s
             const candidateContainers = Array.from(root.querySelectorAll(
                 'ytd-rich-grid-media, ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer, ytd-rich-item-renderer, ytd-rich-section-renderer, ytd-thumbnail'
             ));
+            let durationMatches = 0;
             candidateContainers.forEach(c => {
                 try {
                     if (isShortByDuration(c)) {
+                        durationMatches++;
                         // try to find a link inside
                         const a = c.querySelector('a[href]') || c.querySelector('a');
-                        if (a) highlightShortAnchor(a);
+                        if (a) highlightShortAnchor(a, 'duration');
                         else if (!c.classList.contains(HIGHLIGHT_CLASS)) c.classList.add(HIGHLIGHT_CLASS);
                     }
                 } catch (e) {
                     // ignore per-item errors
                 }
             });
+            debugLog('scanForShortsOnPage: candidateContainers checked', candidateContainers.length, 'durationMatches', durationMatches);
 
             // 3) reel / shorts shelf components
             const reelSelectors = ['ytd-reel-shelf-renderer', 'ytd-reel-player-renderer', 'ytd-rich-shelf-renderer[title*="Shorts"]'];
             for (const sel of reelSelectors) {
                 const nodes = Array.from(root.querySelectorAll(sel));
+                debugLog('scanForShortsOnPage: reel selector', sel, 'found', nodes.length);
                 nodes.forEach(n => {
                     if (!n.classList.contains(HIGHLIGHT_CLASS)) n.classList.add(HIGHLIGHT_CLASS);
                     addBadge(n, false);
+                    debugLog('Highlighted reel node', sel, n);
                 });
             }
 
             // 4) on-watch-player fallback: meta/player
             if (isShortByMetaOrPlayer()) {
+                debugLog('scanForShortsOnPage: matched meta/player heuristics');
                 highlightIfOnShortsPage();
             }
         } catch (e) {
@@ -291,7 +307,7 @@
                     // 1) Direct anchors linking to /shorts/
                     try {
                         const anchors = node.querySelectorAll ? node.querySelectorAll('a[href*="/shorts/"]') : [];
-                        if (anchors && anchors.length) anchors.forEach(a => highlightShortAnchor(a));
+                                    if (anchors && anchors.length) anchors.forEach(a => highlightShortAnchor(a, 'mutation-href'));
                     } catch (e) {
                         // ignore
                     }
@@ -306,7 +322,7 @@
                                 try {
                                     if (isShortByDuration(c)) {
                                         const a = c.querySelector('a[href]') || c.querySelector('a');
-                                        if (a) highlightShortAnchor(a);
+                                                    if (a) highlightShortAnchor(a, 'mutation-duration');
                                         else if (!c.classList.contains(HIGHLIGHT_CLASS)) {
                                             c.classList.add(HIGHLIGHT_CLASS);
                                             addBadge(c, false);
